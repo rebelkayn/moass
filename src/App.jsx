@@ -1,231 +1,405 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 
-const OPERATIONS = [
-  { name: "addition", generate: () => { const a = rand(50, 200); const b = rand(50, 200); return { q: `${a} + ${b}`, answer: a + b }; }},
-  { name: "subtraction", generate: () => { const a = rand(100, 500); const b = rand(10, a); return { q: `${a} − ${b}`, answer: a - b }; }},
-  { name: "multiplication", generate: () => { const a = rand(3, 15); const b = rand(3, 25); return { q: `${a} × ${b}`, answer: a * b }; }},
-  { name: "division", generate: () => { const b = rand(2, 12); const answer = rand(3, 25); return { q: `${b * answer} ÷ ${b}`, answer }; }},
-  { name: "exponent", generate: () => { const base = rand(2, 9); const exp = rand(2, 3); return { q: `${base}${exp === 2 ? "²" : "³"}`, answer: Math.pow(base, exp) }; }},
-  { name: "percent", generate: () => { const p = [10, 20, 25, 50][rand(0, 3)]; const n = rand(2, 20) * (100 / p); return { q: `What is ${p}% of ${n}?`, answer: (p / 100) * n }; }},
-  { name: "fraction", generate: () => { const a = rand(1, 9); const b = rand(1, 9); const d = rand(2, 6); return { q: `${a}/${d} + ${b}/${d}`, answer: `${a + b}/${d}`, raw: (a + b) / d }; }},
-];
+const EMOJIS_SAFE = ["🌸", "🍉", "⭐", "🎈", "🦋", "🌺", "🍊", "💎", "🎵", "🌈", "🍀", "🧸"];
+const POO = "💩";
+const POOL_HEIGHT_PCT = 0.28;
+const SPAWN_INTERVAL_INITIAL = 1200;
+const SPAWN_INTERVAL_MIN = 500;
+const FALL_SPEED_INITIAL = 1.8;
+const FALL_SPEED_MAX = 4.5;
+const POO_CHANCE_INITIAL = 0.25;
+const POO_CHANCE_MAX = 0.5;
 
-function rand(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
-
-function generateChoices(answer) {
-  const num = typeof answer === "string" ? eval(answer) : answer;
-  const choices = new Set();
-  choices.add(typeof answer === "string" ? answer : num);
-  while (choices.size < 4) {
-    const offset = rand(1, Math.max(5, Math.abs(Math.round(num * 0.3))));
-    const wrong = typeof answer === "string"
-      ? `${Math.round(eval(answer) + (Math.random() > 0.5 ? offset : -offset))}/${answer.split("/")[1]}`
-      : num + (Math.random() > 0.5 ? offset : -offset);
-    if (wrong !== answer && wrong !== num && (typeof wrong !== "number" || wrong > 0)) choices.add(wrong);
-  }
-  return [...choices].sort(() => Math.random() - 0.5);
+function rand(min, max) {
+  return Math.random() * (max - min) + min;
 }
 
-function generateQuestion() {
-  const op = OPERATIONS[rand(0, OPERATIONS.length - 1)];
-  const { q, answer } = op.generate();
-  return { question: q, answer, choices: generateChoices(answer) };
-}
+let idCounter = 0;
 
-const TOTAL_QUESTIONS = 10;
-
-const ENCOURAGEMENTS = ["Nailed it! 🎯", "Brilliant! 🧠", "You got it! ✨", "Math wizard! 🪄", "Perfect! 💎", "Correct! 🔥"];
-const MISSES = ["Not quite! 😬", "So close!", "Oops!", "Almost!"];
-
-export default function MathQuiz() {
+export default function PoolPooPatrol() {
   const [phase, setPhase] = useState("start");
-  const [current, setCurrent] = useState(null);
-  const [questionNum, setQuestionNum] = useState(0);
   const [score, setScore] = useState(0);
-  const [selected, setSelected] = useState(null);
-  const [feedback, setFeedback] = useState("");
-  const [streak, setStreak] = useState(0);
-  const [shakeWrong, setShakeWrong] = useState(false);
-  const [history, setHistory] = useState([]);
+  const [highScore, setHighScore] = useState(0);
+  const [emojis, setEmojis] = useState([]);
+  const [splashes, setSplashes] = useState([]);
+  const [tapEffects, setTapEffects] = useState([]);
+  const [lives, setLives] = useState(3);
+  const [level, setLevel] = useState(1);
+  const [screenFlash, setScreenFlash] = useState(false);
+  const gameRef = useRef(null);
+  const animRef = useRef(null);
+  const spawnRef = useRef(null);
+  const emojisRef = useRef([]);
+  const livesRef = useRef(3);
+  const scoreRef = useRef(0);
+  const phaseRef = useRef("start");
+  const levelRef = useRef(1);
+  const gameAreaRef = useRef({ width: 400, height: 700 });
 
-  const nextQuestion = useCallback(() => {
-    if (questionNum >= TOTAL_QUESTIONS) {
-      setPhase("results");
-      return;
-    }
-    setCurrent(generateQuestion());
-    setSelected(null);
-    setFeedback("");
-    setShakeWrong(false);
-  }, [questionNum]);
-
+  useEffect(() => { emojisRef.current = emojis; }, [emojis]);
+  useEffect(() => { livesRef.current = lives; }, [lives]);
+  useEffect(() => { scoreRef.current = score; }, [score]);
+  useEffect(() => { phaseRef.current = phase; }, [phase]);
   useEffect(() => {
-    if (phase === "playing") nextQuestion();
-  }, [phase]);
-
-  const handleChoice = (choice) => {
-    if (selected !== null) return;
-    setSelected(choice);
-    const isCorrect = String(choice) === String(current.answer);
-    const newStreak = isCorrect ? streak + 1 : 0;
-
-    setHistory(h => [...h, { question: current.question, correct: isCorrect, answer: current.answer, picked: choice }]);
-
-    if (isCorrect) {
-      setScore(s => s + 1);
-      setStreak(newStreak);
-      setFeedback(ENCOURAGEMENTS[rand(0, ENCOURAGEMENTS.length - 1)] + (newStreak >= 3 ? ` ${newStreak} streak! 🔥` : ""));
-    } else {
-      setStreak(0);
-      setShakeWrong(true);
-      setFeedback(`${MISSES[rand(0, MISSES.length - 1)]} Answer: ${current.answer}`);
+    const newLevel = Math.floor(score / 5) + 1;
+    if (newLevel !== level) {
+      setLevel(newLevel);
+      levelRef.current = newLevel;
     }
+  }, [score]);
 
-    setTimeout(() => {
-      setQuestionNum(n => n + 1);
-    }, 1500);
-  };
+  const getPoolY = useCallback(() => {
+    return gameAreaRef.current.height * (1 - POOL_HEIGHT_PCT);
+  }, []);
 
-  useEffect(() => {
-    if (questionNum > 0 && questionNum <= TOTAL_QUESTIONS && phase === "playing") {
-      nextQuestion();
-    } else if (questionNum > 0 && questionNum > TOTAL_QUESTIONS) {
-      setPhase("results");
-    }
-  }, [questionNum]);
+  const spawnEmoji = useCallback(() => {
+    if (phaseRef.current !== "playing") return;
+    const lvl = levelRef.current;
+    const pooChance = Math.min(POO_CHANCE_INITIAL + (lvl - 1) * 0.03, POO_CHANCE_MAX);
+    const isPoo = Math.random() < pooChance;
+    const emoji = isPoo ? POO : EMOJIS_SAFE[Math.floor(Math.random() * EMOJIS_SAFE.length)];
+    const speed = Math.min(FALL_SPEED_INITIAL + (lvl - 1) * 0.3, FALL_SPEED_MAX) * rand(0.8, 1.2);
+    const size = isPoo ? rand(42, 56) : rand(30, 44);
+    const w = gameAreaRef.current.width;
+    const x = rand(size, w - size);
 
-  const restart = () => {
-    setPhase("playing");
-    setQuestionNum(0);
+    const newEmoji = {
+      id: ++idCounter,
+      emoji,
+      isPoo,
+      x,
+      y: -size,
+      speed,
+      size,
+      wobble: rand(0, Math.PI * 2),
+      wobbleSpeed: rand(0.02, 0.06),
+      wobbleAmp: rand(8, 20),
+      rotation: rand(-30, 30),
+      rotSpeed: rand(-2, 2),
+      tapped: false,
+    };
+
+    setEmojis(prev => [...prev, newEmoji]);
+  }, []);
+
+  const gameLoop = useCallback(() => {
+    if (phaseRef.current !== "playing") return;
+
+    setEmojis(prev => {
+      const poolY = getPoolY();
+      const updated = [];
+      let livesLost = 0;
+      const newSplashes = [];
+
+      for (const e of prev) {
+        if (e.tapped) continue;
+        const newY = e.y + e.speed;
+        const newWobble = e.wobble + e.wobbleSpeed;
+        const newRot = e.rotation + e.rotSpeed;
+
+        if (newY + e.size / 2 >= poolY) {
+          if (e.isPoo) {
+            livesLost++;
+            newSplashes.push({ id: e.id, x: e.x, y: poolY, type: "poo" });
+          } else {
+            newSplashes.push({ id: e.id, x: e.x, y: poolY, type: "safe" });
+          }
+          continue;
+        }
+
+        updated.push({ ...e, y: newY, wobble: newWobble, rotation: newRot });
+      }
+
+      if (newSplashes.length > 0) {
+        setSplashes(sp => [...sp, ...newSplashes]);
+        setTimeout(() => {
+          setSplashes(sp => sp.filter(s => !newSplashes.find(ns => ns.id === s.id)));
+        }, 600);
+      }
+
+      if (livesLost > 0) {
+        setScreenFlash(true);
+        setTimeout(() => setScreenFlash(false), 300);
+        const newLives = Math.max(0, livesRef.current - livesLost);
+        setLives(newLives);
+        if (newLives <= 0) {
+          setPhase("gameover");
+          setHighScore(h => Math.max(h, scoreRef.current));
+          return [];
+        }
+      }
+
+      return updated;
+    });
+
+    animRef.current = requestAnimationFrame(gameLoop);
+  }, [getPoolY]);
+
+  const startGame = useCallback(() => {
     setScore(0);
-    setStreak(0);
-    setSelected(null);
-    setHistory([]);
-    setFeedback("");
-  };
+    setLives(3);
+    setLevel(1);
+    setEmojis([]);
+    setSplashes([]);
+    setTapEffects([]);
+    scoreRef.current = 0;
+    livesRef.current = 3;
+    levelRef.current = 1;
+    idCounter = 0;
+    setPhase("playing");
+  }, []);
 
-  const pct = Math.round((score / TOTAL_QUESTIONS) * 100);
-  const grade = pct >= 90 ? "A+" : pct >= 80 ? "A" : pct >= 70 ? "B" : pct >= 60 ? "C" : "Keep practicing!";
+  useEffect(() => {
+    if (phase === "playing") {
+      animRef.current = requestAnimationFrame(gameLoop);
+      const spawnTick = () => {
+        if (phaseRef.current !== "playing") return;
+        spawnEmoji();
+        const interval = Math.max(
+          SPAWN_INTERVAL_INITIAL - (levelRef.current - 1) * 80,
+          SPAWN_INTERVAL_MIN
+        );
+        spawnRef.current = setTimeout(spawnTick, interval * rand(0.7, 1.3));
+      };
+      spawnTick();
+
+      return () => {
+        cancelAnimationFrame(animRef.current);
+        clearTimeout(spawnRef.current);
+      };
+    }
+  }, [phase, gameLoop, spawnEmoji]);
+
+  useEffect(() => {
+    const updateSize = () => {
+      if (gameRef.current) {
+        gameAreaRef.current = {
+          width: gameRef.current.clientWidth,
+          height: gameRef.current.clientHeight,
+        };
+      }
+    };
+    updateSize();
+    window.addEventListener("resize", updateSize);
+    return () => window.removeEventListener("resize", updateSize);
+  }, []);
+
+  const handleTap = useCallback((e, emoji) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (emoji.tapped) return;
+
+    if (emoji.isPoo) {
+      setScore(s => s + 1);
+      setTapEffects(prev => [...prev, { id: emoji.id, x: emoji.x, y: emoji.y, text: "+1", color: "#4ade80" }]);
+    } else {
+      setLives(l => {
+        const newL = Math.max(0, l - 1);
+        if (newL <= 0) {
+          setPhase("gameover");
+          setHighScore(h => Math.max(h, scoreRef.current));
+        }
+        return newL;
+      });
+      setScreenFlash(true);
+      setTimeout(() => setScreenFlash(false), 300);
+      setTapEffects(prev => [...prev, { id: emoji.id, x: emoji.x, y: emoji.y, text: "-1 ❤️", color: "#f87171" }]);
+    }
+
+    setEmojis(prev => prev.map(em => em.id === emoji.id ? { ...em, tapped: true } : em));
+    setTimeout(() => {
+      setEmojis(prev => prev.filter(em => em.id !== emoji.id));
+      setTapEffects(prev => prev.filter(te => te.id !== emoji.id));
+    }, 400);
+  }, []);
+
+  const poolY = gameAreaRef.current.height * (1 - POOL_HEIGHT_PCT);
 
   return (
     <div style={styles.wrapper}>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap');
-        @keyframes popIn { 0% { transform: scale(0.8); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
-        @keyframes slideUp { 0% { transform: translateY(30px); opacity: 0; } 100% { transform: translateY(0); opacity: 1; } }
-        @keyframes shake { 0%,100% { transform: translateX(0); } 20%,60% { transform: translateX(-8px); } 40%,80% { transform: translateX(8px); } }
-        @keyframes pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.05); } }
-        @keyframes float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
-        @keyframes gradientMove { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { margin: 0; }
-        .choice-btn { transition: all 0.2s ease; cursor: pointer; border: none; }
-        .choice-btn:hover:not(:disabled) { transform: translateY(-3px); box-shadow: 0 8px 25px rgba(0,0,0,0.15); }
-        .choice-btn:active:not(:disabled) { transform: translateY(0); }
-        .shake { animation: shake 0.5s ease; }
+        @import url('https://fonts.googleapis.com/css2?family=Lilita+One&family=Nunito:wght@600;700;800&display=swap');
+        * { box-sizing: border-box; margin: 0; padding: 0; -webkit-user-select: none; user-select: none; }
+        body { margin: 0; overflow: hidden; }
+        @keyframes popIn { 0% { transform: scale(0); opacity: 0; } 50% { transform: scale(1.2); } 100% { transform: scale(1); opacity: 1; } }
+        @keyframes floatUp { 0% { opacity: 1; transform: translateY(0) scale(1); } 100% { opacity: 0; transform: translateY(-60px) scale(1.3); } }
+        @keyframes splash { 0% { transform: scale(0.5); opacity: 1; } 100% { transform: scale(2); opacity: 0; } }
+        @keyframes tapPop { 0% { transform: scale(1); opacity: 1; } 100% { transform: scale(2.5); opacity: 0; } }
+        @keyframes pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.08); } }
+        @keyframes waveMove { 0% { background-position-x: 0; } 100% { background-position-x: 200px; } }
+        @keyframes flashRed { 0% { background-color: rgba(255,50,50,0.3); } 100% { background-color: transparent; } }
+        @keyframes bobTitle { 0%,100% { transform: translateY(0) rotate(-2deg); } 50% { transform: translateY(-8px) rotate(2deg); } }
+        @keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
       `}</style>
 
-      <div style={styles.container}>
-        {/* Decorative shapes */}
-        <div style={{ ...styles.decor, top: -40, left: -40, width: 120, height: 120, background: "rgba(255,200,50,0.15)", borderRadius: "50%" }} />
-        <div style={{ ...styles.decor, bottom: -30, right: -30, width: 100, height: 100, background: "rgba(100,200,255,0.12)", borderRadius: "30%" }} />
-        <div style={{ ...styles.decor, top: 60, right: -20, width: 60, height: 60, background: "rgba(255,100,150,0.1)", borderRadius: "50%" }} />
+      <div
+        ref={gameRef}
+        style={{
+          ...styles.gameArea,
+          ...(screenFlash ? { animation: "flashRed 0.3s ease" } : {}),
+        }}
+      >
+        {/* Sky gradient */}
+        <div style={styles.sky} />
 
-        {phase === "start" && (
-          <div style={{ animation: "popIn 0.5s ease", textAlign: "center" }}>
-            <div style={{ fontSize: 64, marginBottom: 8, animation: "float 3s ease-in-out infinite" }}>🧮</div>
-            <h1 style={styles.title}>Math Blitz</h1>
-            <p style={styles.subtitle}>10 questions · 7th grade level · How many can you nail?</p>
-            <button onClick={() => setPhase("playing")} style={styles.startBtn} className="choice-btn">
-              Let's Go! →
-            </button>
+        {/* Sun */}
+        <div style={styles.sun}>☀️</div>
+
+        {/* Clouds */}
+        <div style={{ ...styles.cloud, top: "6%", left: "10%", fontSize: 36 }}>☁️</div>
+        <div style={{ ...styles.cloud, top: "3%", right: "15%", fontSize: 28 }}>☁️</div>
+        <div style={{ ...styles.cloud, top: "12%", left: "55%", fontSize: 22 }}>☁️</div>
+
+        {/* Mansion */}
+        <div style={{ ...styles.mansion, bottom: `${POOL_HEIGHT_PCT * 100 + 3}%` }}>
+          <div style={styles.mansionBody}>
+            <div style={styles.mansionRoof} />
+            <div style={styles.mansionWindows}>
+              <div style={styles.window}>🪟</div>
+              <div style={styles.window}>🪟</div>
+              <div style={styles.window}>🪟</div>
+            </div>
+            <div style={styles.mansionDoor}>🚪</div>
           </div>
-        )}
+        </div>
 
-        {phase === "playing" && current && (
-          <div>
-            {/* Progress bar */}
-            <div style={styles.progressContainer}>
-              <div style={{ ...styles.progressBar, width: `${(questionNum / TOTAL_QUESTIONS) * 100}%` }} />
-            </div>
-            <div style={styles.topRow}>
-              <span style={styles.questionCount}>Q{questionNum}/{TOTAL_QUESTIONS}</span>
-              <span style={styles.scoreDisplay}>⭐ {score}</span>
-              {streak >= 2 && <span style={{ ...styles.streakBadge, animation: "pulse 0.6s ease" }}>🔥 {streak}</span>}
-            </div>
+        {/* Palm trees */}
+        <div style={{ ...styles.palm, left: "5%", bottom: `${POOL_HEIGHT_PCT * 100}%` }}>🌴</div>
+        <div style={{ ...styles.palm, right: "5%", bottom: `${POOL_HEIGHT_PCT * 100}%` }}>🌴</div>
 
-            {/* Question */}
-            <div style={{ ...styles.questionCard, animation: "popIn 0.35s ease" }}>
-              <div style={styles.questionLabel}>Solve</div>
-              <div style={styles.questionText}>{current.question}</div>
-            </div>
+        {/* Pool */}
+        <div style={{ ...styles.pool, height: `${POOL_HEIGHT_PCT * 100}%` }}>
+          <div style={styles.poolWater} />
+          <div style={styles.poolEdge} />
+          {/* Pool floaties */}
+          <div style={{ ...styles.floaty, left: "20%", top: "40%" }}>🦩</div>
+          <div style={{ ...styles.floaty, right: "25%", top: "55%" }}>🛟</div>
 
-            {/* Choices */}
-            <div style={styles.choicesGrid}>
-              {current.choices.map((c, i) => {
-                const isSelected = selected !== null && String(c) === String(selected);
-                const isCorrectAnswer = selected !== null && String(c) === String(current.answer);
-                const isWrongSelected = isSelected && !isCorrectAnswer;
-                let bg = styles.choiceColors[i];
-                if (selected !== null) {
-                  if (isCorrectAnswer) bg = "#22c55e";
-                  else if (isWrongSelected) bg = "#ef4444";
-                  else bg = "#d1d5db";
-                }
-                return (
-                  <button
-                    key={i}
-                    className={`choice-btn ${isWrongSelected && shakeWrong ? "shake" : ""}`}
-                    disabled={selected !== null}
-                    onClick={() => handleChoice(c)}
-                    style={{
-                      ...styles.choiceBtn,
-                      background: bg,
-                      animation: `slideUp ${0.3 + i * 0.08}s ease`,
-                      opacity: selected !== null && !isCorrectAnswer && !isWrongSelected ? 0.4 : 1,
-                      color: selected !== null && !isCorrectAnswer && !isWrongSelected ? "#666" : "#fff",
-                    }}
-                  >
-                    <span style={styles.choiceLetter}>{["A", "B", "C", "D"][i]}</span>
-                    <span style={styles.choiceValue}>{c}</span>
-                  </button>
-                );
-              })}
+          {/* Splashes */}
+          {splashes.map(s => (
+            <div
+              key={s.id}
+              style={{
+                position: "absolute",
+                left: s.x - 20,
+                top: 10,
+                fontSize: 32,
+                animation: "splash 0.6s ease forwards",
+                pointerEvents: "none",
+                zIndex: 20,
+              }}
+            >
+              {s.type === "poo" ? "🤢" : "💦"}
             </div>
+          ))}
+        </div>
 
-            {/* Feedback */}
-            {feedback && (
-              <div style={{ ...styles.feedback, animation: "popIn 0.3s ease", color: selected === current.answer ? "#22c55e" : "#ef4444" }}>
-                {feedback}
-              </div>
-            )}
+        {/* Fence */}
+        <div style={styles.fence}>
+          {"🏠".repeat(0)}
+        </div>
+
+        {/* Falling emojis */}
+        {emojis.map(e => (
+          <div
+            key={e.id}
+            onPointerDown={(ev) => handleTap(ev, e)}
+            style={{
+              position: "absolute",
+              left: e.x + Math.sin(e.wobble) * e.wobbleAmp - e.size / 2,
+              top: e.y,
+              width: e.size + 16,
+              height: e.size + 16,
+              fontSize: e.size,
+              lineHeight: `${e.size + 16}px`,
+              textAlign: "center",
+              cursor: "pointer",
+              transform: `rotate(${e.rotation}deg)`,
+              transition: e.tapped ? "all 0.3s ease" : "none",
+              opacity: e.tapped ? 0 : 1,
+              scale: e.tapped ? "2" : "1",
+              zIndex: e.isPoo ? 15 : 10,
+              filter: e.isPoo ? "drop-shadow(0 4px 8px rgba(139,90,43,0.4))" : "none",
+              touchAction: "none",
+            }}
+          >
+            {e.emoji}
           </div>
-        )}
+        ))}
 
-        {phase === "results" && (
-          <div style={{ animation: "popIn 0.5s ease", textAlign: "center" }}>
-            <div style={{ fontSize: 56, marginBottom: 4 }}>{pct >= 80 ? "🏆" : pct >= 60 ? "👏" : "💪"}</div>
-            <h2 style={styles.resultsTitle}>Quiz Complete!</h2>
-            <div style={styles.scoreBig}>{score}/{TOTAL_QUESTIONS}</div>
-            <div style={styles.gradeLabel}>{grade}</div>
-            <div style={styles.pctBar}>
-              <div style={{ ...styles.pctFill, width: `${pct}%`, background: pct >= 70 ? "linear-gradient(90deg, #22c55e, #16a34a)" : "linear-gradient(90deg, #f59e0b, #ea580c)" }} />
+        {/* Tap effects */}
+        {tapEffects.map(te => (
+          <div
+            key={te.id}
+            style={{
+              position: "absolute",
+              left: te.x - 20,
+              top: te.y - 20,
+              fontSize: 22,
+              fontFamily: "'Lilita One', cursive",
+              fontWeight: 800,
+              color: te.color,
+              animation: "floatUp 0.5s ease forwards",
+              pointerEvents: "none",
+              zIndex: 30,
+              textShadow: "0 2px 4px rgba(0,0,0,0.3)",
+            }}
+          >
+            {te.text}
+          </div>
+        ))}
+
+        {/* HUD */}
+        {phase === "playing" && (
+          <div style={styles.hud}>
+            <div style={styles.hudLeft}>
+              <span style={styles.hudScore}>💩 {score}</span>
+              <span style={styles.hudLevel}>Lv.{level}</span>
             </div>
-            <p style={{ color: "#94a3b8", fontSize: 14, marginBottom: 20 }}>{pct}% correct</p>
-
-            {/* History */}
-            <div style={styles.historyBox}>
-              {history.map((h, i) => (
-                <div key={i} style={{ ...styles.historyRow, background: h.correct ? "rgba(34,197,94,0.08)" : "rgba(239,68,68,0.08)" }}>
-                  <span style={{ marginRight: 8 }}>{h.correct ? "✅" : "❌"}</span>
-                  <span style={{ fontFamily: "'Space Mono', monospace", fontSize: 13 }}>{h.question} = {String(h.answer)}</span>
-                </div>
+            <div style={styles.hudRight}>
+              {[...Array(3)].map((_, i) => (
+                <span key={i} style={{ fontSize: 22, opacity: i < lives ? 1 : 0.2, transition: "opacity 0.3s" }}>
+                  ❤️
+                </span>
               ))}
             </div>
+          </div>
+        )}
 
-            <button onClick={restart} style={styles.startBtn} className="choice-btn">
-              Play Again 🔄
-            </button>
+        {/* Start screen */}
+        {phase === "start" && (
+          <div style={styles.overlay}>
+            <div style={{ animation: "popIn 0.5s ease" }}>
+              <div style={{ fontSize: 72, marginBottom: 8, animation: "bobTitle 2s ease-in-out infinite" }}>💩</div>
+              <h1 style={styles.title}>Pool Poo Patrol</h1>
+              <p style={styles.tagline}>Tap the 💩 before it hits the pool!</p>
+              <p style={styles.taglineSub}>Don't tap the other emojis — you'll lose a life!</p>
+              <p style={styles.taglineSub}>Let a 💩 into the pool — you lose a life!</p>
+              <button onClick={startGame} style={styles.playBtn}>
+                Play! 🏊
+              </button>
+              {highScore > 0 && <p style={styles.highScoreText}>Best: {highScore} 💩</p>}
+            </div>
+          </div>
+        )}
+
+        {/* Game over */}
+        {phase === "gameover" && (
+          <div style={styles.overlay}>
+            <div style={{ animation: "popIn 0.5s ease" }}>
+              <div style={{ fontSize: 64, marginBottom: 8 }}>{score >= 20 ? "🏆" : score >= 10 ? "👏" : "😵"}</div>
+              <h2 style={styles.gameOverTitle}>Pool Contaminated!</h2>
+              <div style={styles.finalScore}>{score}</div>
+              <p style={styles.finalLabel}>poops caught</p>
+              {score >= highScore && score > 0 && (
+                <p style={{ color: "#fbbf24", fontFamily: "'Lilita One', cursive", fontSize: 18, marginBottom: 12 }}>
+                  🎉 New High Score!
+                </p>
+              )}
+              <button onClick={startGame} style={styles.playBtn}>
+                Try Again 🔄
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -235,184 +409,227 @@ export default function MathQuiz() {
 
 const styles = {
   wrapper: {
-    minHeight: "100vh",
-    background: "linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%)",
-    backgroundSize: "200% 200%",
-    animation: "gradientMove 15s ease infinite",
+    width: "100vw",
+    height: "100vh",
     display: "flex",
-    alignItems: "center",
     justifyContent: "center",
-    padding: 20,
-    fontFamily: "'Fredoka', sans-serif",
+    alignItems: "center",
+    background: "#1a1a2e",
+    fontFamily: "'Nunito', sans-serif",
   },
-  container: {
+  gameArea: {
     position: "relative",
     width: "100%",
     maxWidth: 480,
-    background: "rgba(30, 41, 59, 0.85)",
-    backdropFilter: "blur(20px)",
-    borderRadius: 28,
-    padding: "36px 28px",
-    border: "1px solid rgba(255,255,255,0.08)",
-    boxShadow: "0 25px 60px rgba(0,0,0,0.4)",
+    height: "100vh",
+    maxHeight: 860,
     overflow: "hidden",
+    borderRadius: 0,
+    boxShadow: "0 0 60px rgba(0,0,0,0.5)",
   },
-  decor: { position: "absolute", pointerEvents: "none", zIndex: 0 },
-  title: {
-    fontSize: 38,
-    fontWeight: 700,
-    color: "#f8fafc",
-    letterSpacing: -1,
-    marginBottom: 8,
+  sky: {
+    position: "absolute",
+    inset: 0,
+    background: "linear-gradient(180deg, #38bdf8 0%, #7dd3fc 35%, #bae6fd 55%, #e0f2fe 75%, #60a832 75.5%, #4d8c28 100%)",
+    zIndex: 0,
   },
-  subtitle: {
-    color: "#94a3b8",
-    fontSize: 15,
-    marginBottom: 32,
-    lineHeight: 1.5,
+  sun: {
+    position: "absolute",
+    top: "4%",
+    right: "12%",
+    fontSize: 48,
+    zIndex: 1,
+    filter: "drop-shadow(0 0 20px rgba(250,200,50,0.6))",
   },
-  startBtn: {
-    background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
-    color: "#fff",
-    border: "none",
-    borderRadius: 16,
-    padding: "16px 40px",
-    fontSize: 18,
-    fontWeight: 600,
-    fontFamily: "'Fredoka', sans-serif",
-    cursor: "pointer",
-    boxShadow: "0 6px 20px rgba(99,102,241,0.4)",
+  cloud: {
+    position: "absolute",
+    zIndex: 1,
+    opacity: 0.9,
   },
-  progressContainer: {
-    height: 6,
-    background: "rgba(255,255,255,0.08)",
-    borderRadius: 3,
-    marginBottom: 16,
-    overflow: "hidden",
-  },
-  progressBar: {
-    height: "100%",
-    background: "linear-gradient(90deg, #6366f1, #a78bfa)",
-    borderRadius: 3,
-    transition: "width 0.4s ease",
-  },
-  topRow: {
+  mansion: {
+    position: "absolute",
+    left: "50%",
+    transform: "translateX(-50%)",
+    zIndex: 2,
     display: "flex",
+    flexDirection: "column",
     alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 20,
   },
-  questionCount: { color: "#94a3b8", fontSize: 13, fontWeight: 500 },
-  scoreDisplay: { color: "#fbbf24", fontSize: 15, fontWeight: 600 },
-  streakBadge: {
-    background: "rgba(249,115,22,0.2)",
-    color: "#fb923c",
-    borderRadius: 20,
-    padding: "4px 12px",
-    fontSize: 13,
-    fontWeight: 600,
+  mansionBody: {
+    position: "relative",
+    width: 200,
+    height: 100,
+    background: "linear-gradient(180deg, #fef3c7, #fde68a)",
+    borderRadius: "8px 8px 0 0",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    boxShadow: "0 4px 15px rgba(0,0,0,0.15)",
+    border: "2px solid #d97706",
   },
-  questionCard: {
-    background: "rgba(255,255,255,0.05)",
-    borderRadius: 20,
-    padding: "28px 20px",
-    textAlign: "center",
-    marginBottom: 24,
-    border: "1px solid rgba(255,255,255,0.06)",
+  mansionRoof: {
+    position: "absolute",
+    top: -30,
+    left: -20,
+    width: 240,
+    height: 0,
+    borderLeft: "20px solid transparent",
+    borderRight: "20px solid transparent",
+    borderBottom: "30px solid #92400e",
   },
-  questionLabel: {
-    color: "#64748b",
-    fontSize: 12,
-    textTransform: "uppercase",
-    letterSpacing: 2,
-    marginBottom: 12,
-    fontWeight: 600,
+  mansionWindows: {
+    display: "flex",
+    gap: 16,
+    marginTop: 8,
   },
-  questionText: {
-    color: "#f1f5f9",
+  window: { fontSize: 28 },
+  mansionDoor: { fontSize: 28, marginTop: 4 },
+  palm: {
+    position: "absolute",
+    fontSize: 56,
+    zIndex: 3,
+    filter: "drop-shadow(2px 4px 6px rgba(0,0,0,0.2))",
+  },
+  pool: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    zIndex: 5,
+    overflow: "hidden",
+  },
+  poolWater: {
+    position: "absolute",
+    inset: 0,
+    background: "linear-gradient(180deg, rgba(56,189,248,0.85) 0%, rgba(14,116,144,0.95) 100%)",
+    backgroundSize: "200px 100%",
+    animation: "waveMove 4s linear infinite",
+  },
+  poolEdge: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 12,
+    background: "linear-gradient(90deg, #d4d4d8, #e4e4e7, #d4d4d8)",
+    borderRadius: "0",
+    boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
+    zIndex: 6,
+  },
+  floaty: {
+    position: "absolute",
     fontSize: 32,
+    opacity: 0.7,
+    zIndex: 7,
+    animation: "pulse 3s ease-in-out infinite",
+  },
+  fence: {
+    position: "absolute",
+    bottom: "28%",
+    left: 0,
+    right: 0,
+    height: 4,
+    zIndex: 4,
+  },
+  hud: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: "12px 16px",
+    paddingTop: 48,
+    background: "linear-gradient(180deg, rgba(0,0,0,0.35) 0%, transparent 100%)",
+    zIndex: 50,
+  },
+  hudLeft: { display: "flex", alignItems: "center", gap: 12 },
+  hudRight: { display: "flex", gap: 4 },
+  hudScore: {
+    fontFamily: "'Lilita One', cursive",
+    fontSize: 26,
+    color: "#fff",
+    textShadow: "0 2px 6px rgba(0,0,0,0.4)",
+  },
+  hudLevel: {
+    fontFamily: "'Nunito', sans-serif",
+    fontSize: 14,
     fontWeight: 700,
-    fontFamily: "'Space Mono', monospace",
+    color: "#fbbf24",
+    background: "rgba(0,0,0,0.3)",
+    borderRadius: 8,
+    padding: "2px 8px",
   },
-  choicesGrid: {
-    display: "grid",
-    gridTemplateColumns: "1fr 1fr",
-    gap: 12,
-    marginBottom: 16,
-  },
-  choiceBtn: {
-    borderRadius: 16,
-    padding: "18px 12px",
+  overlay: {
+    position: "absolute",
+    inset: 0,
+    background: "rgba(15,23,42,0.88)",
+    backdropFilter: "blur(8px)",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
-    fontFamily: "'Fredoka', sans-serif",
-    fontSize: 16,
-    fontWeight: 600,
-  },
-  choiceLetter: {
-    opacity: 0.6,
-    fontSize: 12,
-    fontWeight: 500,
-  },
-  choiceValue: {
-    fontFamily: "'Space Mono', monospace",
-    fontSize: 18,
-    fontWeight: 700,
-  },
-  choiceColors: ["#6366f1", "#ec4899", "#f59e0b", "#14b8a6"],
-  feedback: {
     textAlign: "center",
-    fontSize: 16,
-    fontWeight: 600,
-    padding: 8,
+    zIndex: 100,
+    padding: 24,
   },
-  resultsTitle: {
-    color: "#f8fafc",
-    fontSize: 28,
-    fontWeight: 700,
-    marginBottom: 8,
+  title: {
+    fontFamily: "'Lilita One', cursive",
+    fontSize: 38,
+    color: "#fff",
+    marginBottom: 12,
+    textShadow: "0 3px 10px rgba(0,0,0,0.3)",
+    letterSpacing: 1,
   },
-  scoreBig: {
-    fontFamily: "'Space Mono', monospace",
-    fontSize: 52,
+  tagline: {
+    color: "#e2e8f0",
+    fontSize: 17,
+    marginBottom: 6,
     fontWeight: 700,
-    color: "#f8fafc",
+  },
+  taglineSub: {
+    color: "#94a3b8",
+    fontSize: 14,
     marginBottom: 4,
   },
-  gradeLabel: {
-    fontSize: 20,
-    fontWeight: 600,
-    color: "#a78bfa",
-    marginBottom: 16,
+  playBtn: {
+    marginTop: 24,
+    background: "linear-gradient(135deg, #f59e0b, #d97706)",
+    color: "#fff",
+    border: "none",
+    borderRadius: 20,
+    padding: "16px 48px",
+    fontSize: 22,
+    fontFamily: "'Lilita One', cursive",
+    cursor: "pointer",
+    boxShadow: "0 6px 24px rgba(245,158,11,0.4)",
+    transition: "transform 0.2s",
+    letterSpacing: 1,
   },
-  pctBar: {
-    height: 10,
-    background: "rgba(255,255,255,0.08)",
-    borderRadius: 5,
-    overflow: "hidden",
-    marginBottom: 8,
-  },
-  pctFill: {
-    height: "100%",
-    borderRadius: 5,
-    transition: "width 1s ease",
-  },
-  historyBox: {
-    maxHeight: 180,
-    overflowY: "auto",
-    marginBottom: 24,
-    display: "flex",
-    flexDirection: "column",
-    gap: 6,
-  },
-  historyRow: {
-    display: "flex",
-    alignItems: "center",
-    padding: "8px 12px",
-    borderRadius: 10,
+  highScoreText: {
+    color: "#94a3b8",
+    marginTop: 16,
     fontSize: 14,
-    color: "#cbd5e1",
+    fontWeight: 600,
+  },
+  gameOverTitle: {
+    fontFamily: "'Lilita One', cursive",
+    fontSize: 32,
+    color: "#f87171",
+    marginBottom: 8,
+    textShadow: "0 2px 8px rgba(0,0,0,0.3)",
+  },
+  finalScore: {
+    fontFamily: "'Lilita One', cursive",
+    fontSize: 64,
+    color: "#fff",
+    textShadow: "0 4px 12px rgba(0,0,0,0.3)",
+  },
+  finalLabel: {
+    color: "#94a3b8",
+    fontSize: 16,
+    marginBottom: 12,
+    fontWeight: 700,
   },
 };
