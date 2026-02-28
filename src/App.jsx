@@ -3,12 +3,12 @@ import { useState, useEffect, useRef, useCallback } from "react";
 const EMOJIS_SAFE = ["🌸", "🍉", "⭐", "🎈", "🦋", "🌺", "🍊", "💎", "🎵", "🌈", "🍀", "🧸"];
 const POO = "💩";
 const POOL_HEIGHT_PCT = 0.28;
-const SPAWN_INTERVAL_INITIAL = 1200;
-const SPAWN_INTERVAL_MIN = 500;
-const FALL_SPEED_INITIAL = 1.8;
-const FALL_SPEED_MAX = 4.5;
-const POO_CHANCE_INITIAL = 0.25;
-const POO_CHANCE_MAX = 0.5;
+const SPAWN_INTERVAL_INITIAL = 1400;
+const SPAWN_INTERVAL_MIN = 300;
+const FALL_SPEED_INITIAL = 1.2;
+const FALL_SPEED_MAX = 7;
+const POO_CHANCE_INITIAL = 0.28;
+const POO_CHANCE_MAX = 0.55;
 
 function rand(min, max) {
   return Math.random() * (max - min) + min;
@@ -23,30 +23,19 @@ export default function PoolPooPatrol() {
   const [emojis, setEmojis] = useState([]);
   const [splashes, setSplashes] = useState([]);
   const [tapEffects, setTapEffects] = useState([]);
-  const [lives, setLives] = useState(3);
-  const [level, setLevel] = useState(1);
   const [screenFlash, setScreenFlash] = useState(false);
+  const [speedLevel, setSpeedLevel] = useState(0);
   const gameRef = useRef(null);
   const animRef = useRef(null);
   const spawnRef = useRef(null);
-  const emojisRef = useRef([]);
-  const livesRef = useRef(3);
   const scoreRef = useRef(0);
   const phaseRef = useRef("start");
-  const levelRef = useRef(1);
+  const speedRef = useRef(0);
   const gameAreaRef = useRef({ width: 400, height: 700 });
 
-  useEffect(() => { emojisRef.current = emojis; }, [emojis]);
-  useEffect(() => { livesRef.current = lives; }, [lives]);
   useEffect(() => { scoreRef.current = score; }, [score]);
   useEffect(() => { phaseRef.current = phase; }, [phase]);
-  useEffect(() => {
-    const newLevel = Math.floor(score / 5) + 1;
-    if (newLevel !== level) {
-      setLevel(newLevel);
-      levelRef.current = newLevel;
-    }
-  }, [score]);
+  useEffect(() => { speedRef.current = speedLevel; }, [speedLevel]);
 
   const getPoolY = useCallback(() => {
     return gameAreaRef.current.height * (1 - POOL_HEIGHT_PCT);
@@ -54,11 +43,11 @@ export default function PoolPooPatrol() {
 
   const spawnEmoji = useCallback(() => {
     if (phaseRef.current !== "playing") return;
-    const lvl = levelRef.current;
-    const pooChance = Math.min(POO_CHANCE_INITIAL + (lvl - 1) * 0.03, POO_CHANCE_MAX);
+    const spd = speedRef.current;
+    const pooChance = Math.min(POO_CHANCE_INITIAL + spd * 0.015, POO_CHANCE_MAX);
     const isPoo = Math.random() < pooChance;
     const emoji = isPoo ? POO : EMOJIS_SAFE[Math.floor(Math.random() * EMOJIS_SAFE.length)];
-    const speed = Math.min(FALL_SPEED_INITIAL + (lvl - 1) * 0.3, FALL_SPEED_MAX) * rand(0.8, 1.2);
+    const speed = Math.min(FALL_SPEED_INITIAL + spd * 0.18, FALL_SPEED_MAX) * rand(0.85, 1.15);
     const size = isPoo ? rand(42, 56) : rand(30, 44);
     const w = gameAreaRef.current.width;
     const x = rand(size, w - size);
@@ -88,7 +77,7 @@ export default function PoolPooPatrol() {
     setEmojis(prev => {
       const poolY = getPoolY();
       const updated = [];
-      let livesLost = 0;
+      let pooHitPool = false;
       const newSplashes = [];
 
       for (const e of prev) {
@@ -99,7 +88,7 @@ export default function PoolPooPatrol() {
 
         if (newY + e.size / 2 >= poolY) {
           if (e.isPoo) {
-            livesLost++;
+            pooHitPool = true;
             newSplashes.push({ id: e.id, x: e.x, y: poolY, type: "poo" });
           } else {
             newSplashes.push({ id: e.id, x: e.x, y: poolY, type: "safe" });
@@ -117,16 +106,12 @@ export default function PoolPooPatrol() {
         }, 600);
       }
 
-      if (livesLost > 0) {
+      if (pooHitPool) {
         setScreenFlash(true);
-        setTimeout(() => setScreenFlash(false), 300);
-        const newLives = Math.max(0, livesRef.current - livesLost);
-        setLives(newLives);
-        if (newLives <= 0) {
-          setPhase("gameover");
-          setHighScore(h => Math.max(h, scoreRef.current));
-          return [];
-        }
+        setTimeout(() => setScreenFlash(false), 400);
+        setPhase("gameover");
+        setHighScore(h => Math.max(h, scoreRef.current));
+        return [];
       }
 
       return updated;
@@ -137,14 +122,12 @@ export default function PoolPooPatrol() {
 
   const startGame = useCallback(() => {
     setScore(0);
-    setLives(3);
-    setLevel(1);
     setEmojis([]);
     setSplashes([]);
     setTapEffects([]);
+    setSpeedLevel(0);
     scoreRef.current = 0;
-    livesRef.current = 3;
-    levelRef.current = 1;
+    speedRef.current = 0;
     idCounter = 0;
     setPhase("playing");
   }, []);
@@ -156,7 +139,7 @@ export default function PoolPooPatrol() {
         if (phaseRef.current !== "playing") return;
         spawnEmoji();
         const interval = Math.max(
-          SPAWN_INTERVAL_INITIAL - (levelRef.current - 1) * 80,
+          SPAWN_INTERVAL_INITIAL - speedRef.current * 50,
           SPAWN_INTERVAL_MIN
         );
         spawnRef.current = setTimeout(spawnTick, interval * rand(0.7, 1.3));
@@ -187,23 +170,18 @@ export default function PoolPooPatrol() {
   const handleTap = useCallback((e, emoji) => {
     e.preventDefault();
     e.stopPropagation();
-    if (emoji.tapped) return;
+    if (emoji.tapped || phaseRef.current !== "playing") return;
 
     if (emoji.isPoo) {
       setScore(s => s + 1);
-      setTapEffects(prev => [...prev, { id: emoji.id, x: emoji.x, y: emoji.y, text: "+1", color: "#4ade80" }]);
+      setSpeedLevel(s => s + 1);
+      setTapEffects(prev => [...prev, { id: emoji.id, x: emoji.x, y: emoji.y, text: "+1 🏎️", color: "#4ade80" }]);
     } else {
-      setLives(l => {
-        const newL = Math.max(0, l - 1);
-        if (newL <= 0) {
-          setPhase("gameover");
-          setHighScore(h => Math.max(h, scoreRef.current));
-        }
-        return newL;
-      });
       setScreenFlash(true);
-      setTimeout(() => setScreenFlash(false), 300);
-      setTapEffects(prev => [...prev, { id: emoji.id, x: emoji.x, y: emoji.y, text: "-1 ❤️", color: "#f87171" }]);
+      setTimeout(() => setScreenFlash(false), 400);
+      setPhase("gameover");
+      setHighScore(h => Math.max(h, scoreRef.current));
+      setTapEffects(prev => [...prev, { id: emoji.id, x: emoji.x, y: emoji.y, text: "WRONG!", color: "#f87171" }]);
     }
 
     setEmojis(prev => prev.map(em => em.id === emoji.id ? { ...em, tapped: true } : em));
@@ -213,7 +191,13 @@ export default function PoolPooPatrol() {
     }, 400);
   }, []);
 
-  const poolY = gameAreaRef.current.height * (1 - POOL_HEIGHT_PCT);
+  const getSpeedLabel = () => {
+    if (speedLevel < 3) return "";
+    if (speedLevel < 8) return "⚡ Getting faster!";
+    if (speedLevel < 15) return "🔥 Speed up!";
+    if (speedLevel < 25) return "🚀 TURBO MODE";
+    return "☠️ INSANE SPEED";
+  };
 
   return (
     <div style={styles.wrapper}>
@@ -224,33 +208,26 @@ export default function PoolPooPatrol() {
         @keyframes popIn { 0% { transform: scale(0); opacity: 0; } 50% { transform: scale(1.2); } 100% { transform: scale(1); opacity: 1; } }
         @keyframes floatUp { 0% { opacity: 1; transform: translateY(0) scale(1); } 100% { opacity: 0; transform: translateY(-60px) scale(1.3); } }
         @keyframes splash { 0% { transform: scale(0.5); opacity: 1; } 100% { transform: scale(2); opacity: 0; } }
-        @keyframes tapPop { 0% { transform: scale(1); opacity: 1; } 100% { transform: scale(2.5); opacity: 0; } }
         @keyframes pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.08); } }
         @keyframes waveMove { 0% { background-position-x: 0; } 100% { background-position-x: 200px; } }
-        @keyframes flashRed { 0% { background-color: rgba(255,50,50,0.3); } 100% { background-color: transparent; } }
+        @keyframes flashRed { 0% { background-color: rgba(255,50,50,0.4); } 100% { background-color: transparent; } }
         @keyframes bobTitle { 0%,100% { transform: translateY(0) rotate(-2deg); } 50% { transform: translateY(-8px) rotate(2deg); } }
-        @keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+        @keyframes speedPulse { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.7; transform: scale(1.1); } }
       `}</style>
 
       <div
         ref={gameRef}
         style={{
           ...styles.gameArea,
-          ...(screenFlash ? { animation: "flashRed 0.3s ease" } : {}),
+          ...(screenFlash ? { animation: "flashRed 0.4s ease" } : {}),
         }}
       >
-        {/* Sky gradient */}
         <div style={styles.sky} />
-
-        {/* Sun */}
         <div style={styles.sun}>☀️</div>
-
-        {/* Clouds */}
         <div style={{ ...styles.cloud, top: "6%", left: "10%", fontSize: 36 }}>☁️</div>
         <div style={{ ...styles.cloud, top: "3%", right: "15%", fontSize: 28 }}>☁️</div>
         <div style={{ ...styles.cloud, top: "12%", left: "55%", fontSize: 22 }}>☁️</div>
 
-        {/* Mansion */}
         <div style={{ ...styles.mansion, bottom: `${POOL_HEIGHT_PCT * 100 + 3}%` }}>
           <div style={styles.mansionBody}>
             <div style={styles.mansionRoof} />
@@ -263,19 +240,15 @@ export default function PoolPooPatrol() {
           </div>
         </div>
 
-        {/* Palm trees */}
         <div style={{ ...styles.palm, left: "5%", bottom: `${POOL_HEIGHT_PCT * 100}%` }}>🌴</div>
         <div style={{ ...styles.palm, right: "5%", bottom: `${POOL_HEIGHT_PCT * 100}%` }}>🌴</div>
 
-        {/* Pool */}
         <div style={{ ...styles.pool, height: `${POOL_HEIGHT_PCT * 100}%` }}>
           <div style={styles.poolWater} />
           <div style={styles.poolEdge} />
-          {/* Pool floaties */}
           <div style={{ ...styles.floaty, left: "20%", top: "40%" }}>🦩</div>
           <div style={{ ...styles.floaty, right: "25%", top: "55%" }}>🛟</div>
 
-          {/* Splashes */}
           {splashes.map(s => (
             <div
               key={s.id}
@@ -289,17 +262,11 @@ export default function PoolPooPatrol() {
                 zIndex: 20,
               }}
             >
-              {s.type === "poo" ? "🤢" : "💦"}
+              {s.type === "poo" ? "🤮" : "💦"}
             </div>
           ))}
         </div>
 
-        {/* Fence */}
-        <div style={styles.fence}>
-          {"🏠".repeat(0)}
-        </div>
-
-        {/* Falling emojis */}
         {emojis.map(e => (
           <div
             key={e.id}
@@ -319,7 +286,7 @@ export default function PoolPooPatrol() {
               opacity: e.tapped ? 0 : 1,
               scale: e.tapped ? "2" : "1",
               zIndex: e.isPoo ? 15 : 10,
-              filter: e.isPoo ? "drop-shadow(0 4px 8px rgba(139,90,43,0.4))" : "none",
+              filter: e.isPoo ? "drop-shadow(0 4px 8px rgba(139,90,43,0.5))" : "none",
               touchAction: "none",
             }}
           >
@@ -327,7 +294,6 @@ export default function PoolPooPatrol() {
           </div>
         ))}
 
-        {/* Tap effects */}
         {tapEffects.map(te => (
           <div
             key={te.id}
@@ -335,46 +301,49 @@ export default function PoolPooPatrol() {
               position: "absolute",
               left: te.x - 20,
               top: te.y - 20,
-              fontSize: 22,
+              fontSize: 20,
               fontFamily: "'Lilita One', cursive",
               fontWeight: 800,
               color: te.color,
               animation: "floatUp 0.5s ease forwards",
               pointerEvents: "none",
               zIndex: 30,
-              textShadow: "0 2px 4px rgba(0,0,0,0.3)",
+              textShadow: "0 2px 4px rgba(0,0,0,0.4)",
             }}
           >
             {te.text}
           </div>
         ))}
 
-        {/* HUD */}
         {phase === "playing" && (
           <div style={styles.hud}>
             <div style={styles.hudLeft}>
               <span style={styles.hudScore}>💩 {score}</span>
-              <span style={styles.hudLevel}>Lv.{level}</span>
+            </div>
+            <div style={styles.hudCenter}>
+              {getSpeedLabel() && (
+                <span style={{ ...styles.speedLabel, animation: "speedPulse 1s ease-in-out infinite" }}>
+                  {getSpeedLabel()}
+                </span>
+              )}
             </div>
             <div style={styles.hudRight}>
-              {[...Array(3)].map((_, i) => (
-                <span key={i} style={{ fontSize: 22, opacity: i < lives ? 1 : 0.2, transition: "opacity 0.3s" }}>
-                  ❤️
-                </span>
-              ))}
+              <span style={styles.hudSpeed}>×{(1 + speedLevel * 0.15).toFixed(1)}</span>
             </div>
           </div>
         )}
 
-        {/* Start screen */}
         {phase === "start" && (
           <div style={styles.overlay}>
             <div style={{ animation: "popIn 0.5s ease" }}>
               <div style={{ fontSize: 72, marginBottom: 8, animation: "bobTitle 2s ease-in-out infinite" }}>💩</div>
               <h1 style={styles.title}>Pool Poo Patrol</h1>
-              <p style={styles.tagline}>Tap the 💩 before it hits the pool!</p>
-              <p style={styles.taglineSub}>Don't tap the other emojis — you'll lose a life!</p>
-              <p style={styles.taglineSub}>Let a 💩 into the pool — you lose a life!</p>
+              <div style={styles.rulesBox}>
+                <p style={styles.rule}>👆 Tap the 💩 to score — game speeds up each tap!</p>
+                <p style={styles.rule}>🚫 Don't tap other emojis — instant game over!</p>
+                <p style={styles.rule}>🏊 If a 💩 hits the pool — game over!</p>
+                <p style={{ ...styles.rule, color: "#fbbf24", marginTop: 8 }}>How long can you survive? 💀</p>
+              </div>
               <button onClick={startGame} style={styles.playBtn}>
                 Play! 🏊
               </button>
@@ -383,14 +352,18 @@ export default function PoolPooPatrol() {
           </div>
         )}
 
-        {/* Game over */}
         {phase === "gameover" && (
           <div style={styles.overlay}>
             <div style={{ animation: "popIn 0.5s ease" }}>
-              <div style={{ fontSize: 64, marginBottom: 8 }}>{score >= 20 ? "🏆" : score >= 10 ? "👏" : "😵"}</div>
-              <h2 style={styles.gameOverTitle}>Pool Contaminated!</h2>
+              <div style={{ fontSize: 64, marginBottom: 8 }}>
+                {score >= 30 ? "🏆" : score >= 20 ? "🔥" : score >= 10 ? "👏" : "💀"}
+              </div>
+              <h2 style={styles.gameOverTitle}>
+                {score >= 30 ? "LEGENDARY!" : score >= 20 ? "INSANE RUN!" : score >= 10 ? "Nice try!" : "Pool Contaminated!"}
+              </h2>
               <div style={styles.finalScore}>{score}</div>
               <p style={styles.finalLabel}>poops caught</p>
+              <p style={styles.speedStat}>Top speed: ×{(1 + speedLevel * 0.15).toFixed(1)}</p>
               {score >= highScore && score > 0 && (
                 <p style={{ color: "#fbbf24", fontFamily: "'Lilita One', cursive", fontSize: 18, marginBottom: 12 }}>
                   🎉 New High Score!
@@ -424,7 +397,6 @@ const styles = {
     height: "100vh",
     maxHeight: 860,
     overflow: "hidden",
-    borderRadius: 0,
     boxShadow: "0 0 60px rgba(0,0,0,0.5)",
   },
   sky: {
@@ -441,19 +413,12 @@ const styles = {
     zIndex: 1,
     filter: "drop-shadow(0 0 20px rgba(250,200,50,0.6))",
   },
-  cloud: {
-    position: "absolute",
-    zIndex: 1,
-    opacity: 0.9,
-  },
+  cloud: { position: "absolute", zIndex: 1, opacity: 0.9 },
   mansion: {
     position: "absolute",
     left: "50%",
     transform: "translateX(-50%)",
     zIndex: 2,
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
   },
   mansionBody: {
     position: "relative",
@@ -478,11 +443,7 @@ const styles = {
     borderRight: "20px solid transparent",
     borderBottom: "30px solid #92400e",
   },
-  mansionWindows: {
-    display: "flex",
-    gap: 16,
-    marginTop: 8,
-  },
+  mansionWindows: { display: "flex", gap: 16, marginTop: 8 },
   window: { fontSize: 28 },
   mansionDoor: { fontSize: 28, marginTop: 4 },
   palm: {
@@ -513,7 +474,6 @@ const styles = {
     right: 0,
     height: 12,
     background: "linear-gradient(90deg, #d4d4d8, #e4e4e7, #d4d4d8)",
-    borderRadius: "0",
     boxShadow: "0 2px 8px rgba(0,0,0,0.2)",
     zIndex: 6,
   },
@@ -523,14 +483,6 @@ const styles = {
     opacity: 0.7,
     zIndex: 7,
     animation: "pulse 3s ease-in-out infinite",
-  },
-  fence: {
-    position: "absolute",
-    bottom: "28%",
-    left: 0,
-    right: 0,
-    height: 4,
-    zIndex: 4,
   },
   hud: {
     position: "absolute",
@@ -546,21 +498,27 @@ const styles = {
     zIndex: 50,
   },
   hudLeft: { display: "flex", alignItems: "center", gap: 12 },
-  hudRight: { display: "flex", gap: 4 },
+  hudCenter: { flex: 1, textAlign: "center" },
+  hudRight: { display: "flex", alignItems: "center" },
   hudScore: {
     fontFamily: "'Lilita One', cursive",
     fontSize: 26,
     color: "#fff",
     textShadow: "0 2px 6px rgba(0,0,0,0.4)",
   },
-  hudLevel: {
-    fontFamily: "'Nunito', sans-serif",
-    fontSize: 14,
-    fontWeight: 700,
+  hudSpeed: {
+    fontFamily: "'Lilita One', cursive",
+    fontSize: 18,
     color: "#fbbf24",
-    background: "rgba(0,0,0,0.3)",
-    borderRadius: 8,
-    padding: "2px 8px",
+    background: "rgba(0,0,0,0.35)",
+    borderRadius: 10,
+    padding: "4px 10px",
+  },
+  speedLabel: {
+    fontFamily: "'Lilita One', cursive",
+    fontSize: 13,
+    color: "#fb923c",
+    textShadow: "0 1px 4px rgba(0,0,0,0.3)",
   },
   overlay: {
     position: "absolute",
@@ -578,23 +536,26 @@ const styles = {
     fontFamily: "'Lilita One', cursive",
     fontSize: 38,
     color: "#fff",
-    marginBottom: 12,
+    marginBottom: 16,
     textShadow: "0 3px 10px rgba(0,0,0,0.3)",
     letterSpacing: 1,
   },
-  tagline: {
-    color: "#e2e8f0",
-    fontSize: 17,
+  rulesBox: {
+    background: "rgba(255,255,255,0.06)",
+    borderRadius: 16,
+    padding: "16px 20px",
+    marginBottom: 24,
+    border: "1px solid rgba(255,255,255,0.08)",
+  },
+  rule: {
+    color: "#cbd5e1",
+    fontSize: 14,
     marginBottom: 6,
     fontWeight: 700,
-  },
-  taglineSub: {
-    color: "#94a3b8",
-    fontSize: 14,
-    marginBottom: 4,
+    lineHeight: 1.5,
   },
   playBtn: {
-    marginTop: 24,
+    marginTop: 8,
     background: "linear-gradient(135deg, #f59e0b, #d97706)",
     color: "#fff",
     border: "none",
@@ -604,7 +565,6 @@ const styles = {
     fontFamily: "'Lilita One', cursive",
     cursor: "pointer",
     boxShadow: "0 6px 24px rgba(245,158,11,0.4)",
-    transition: "transform 0.2s",
     letterSpacing: 1,
   },
   highScoreText: {
@@ -615,7 +575,7 @@ const styles = {
   },
   gameOverTitle: {
     fontFamily: "'Lilita One', cursive",
-    fontSize: 32,
+    fontSize: 30,
     color: "#f87171",
     marginBottom: 8,
     textShadow: "0 2px 8px rgba(0,0,0,0.3)",
@@ -629,7 +589,13 @@ const styles = {
   finalLabel: {
     color: "#94a3b8",
     fontSize: 16,
-    marginBottom: 12,
+    marginBottom: 4,
     fontWeight: 700,
+  },
+  speedStat: {
+    color: "#fbbf24",
+    fontSize: 14,
+    fontWeight: 700,
+    marginBottom: 12,
   },
 };
