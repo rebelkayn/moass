@@ -551,7 +551,6 @@ export default function Game() {
               {doublePoints&&<span style={{fontSize:14,marginRight:6,animation:"powerGlow 1s infinite"}}>⭐2X</span>}
               {hasShield&&<span style={{fontSize:14,marginRight:6}}>🛡️</span>}
               <span style={S.hudSpd}>×{speedMult.toFixed(1)}</span>
-              <span onClick={()=>{setMusicOn(m=>{const n=!m;if(n){setupMusic();}else{stopMusic();}return n;});}} style={{marginLeft:8,fontSize:16,cursor:"pointer",opacity:musicOn?1:0.4,filter:"drop-shadow(0 0 4px rgba(255,255,255,.3))"}}>{musicOn?"🔊":"🔇"}</span>
             </div>
           </div>
           {combo>=3&&<div style={{...S.combo,animation:"comboGlow .5s infinite"}}>COMBO ×{combo}</div>}
@@ -584,10 +583,6 @@ export default function Game() {
                 </div>
                 <div style={S.playsBox}><span style={{color:"#94a3b8",fontSize:13}}>Plays today: </span>
                   {[...Array(MAX_PLAYS_PER_DAY)].map((_,i)=><span key={i} style={{fontSize:18,opacity:i<playsLeft?1:.2,marginLeft:2}}>🚀</span>)}</div>
-                <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,marginBottom:12}}>
-                  <span onClick={()=>setMusicOn(m=>!m)} style={{cursor:"pointer",fontSize:22,opacity:musicOn?1:0.4,transition:"opacity .2s"}}>{musicOn?"🔊":"🔇"}</span>
-                  <span style={{color:"#64748b",fontSize:12,fontWeight:700}}>{musicOn?"Music ON":"Music OFF"}</span>
-                </div>
                 {playsLeft>0?<button onClick={startGame} style={S.playBtn}>DEFEND EARTH! 🚀</button>
                   :<div style={{marginTop:16}}><p style={{color:"#f87171",fontFamily:"'Bungee',cursive",fontSize:16}}>No plays left today!</p><p style={{color:"#64748b",fontSize:13,marginTop:4}}>Come back tomorrow</p></div>}
                 <p onClick={()=>{setShowCode(true);setCodeIn("");setCodeErr("");setCodeOk(false)}} style={S.secLink}>Got a code?</p>
