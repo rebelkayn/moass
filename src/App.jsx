@@ -1,4 +1,90 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import * as Tone from "tone";
+
+// ─── MUSIC ENGINE ───
+let musicStarted = false;
+let musicParts = {};
+
+function setupMusic() {
+  if (musicStarted) return;
+  musicStarted = true;
+
+  // Main synth — dreamy space pad
+  const pad = new Tone.PolySynth(Tone.Synth, {
+    oscillator: { type: "sine" },
+    envelope: { attack: 0.8, decay: 1.5, sustain: 0.4, release: 2 },
+    volume: -18,
+  }).toDestination();
+
+  // Bass synth
+  const bass = new Tone.MonoSynth({
+    oscillator: { type: "triangle" },
+    envelope: { attack: 0.1, decay: 0.4, sustain: 0.6, release: 0.8 },
+    filterEnvelope: { attack: 0.05, decay: 0.2, sustain: 0.4, release: 0.5, baseFrequency: 100, octaves: 2 },
+    volume: -20,
+  }).toDestination();
+
+  // Sparkle / arp synth
+  const arp = new Tone.Synth({
+    oscillator: { type: "sine" },
+    envelope: { attack: 0.01, decay: 0.3, sustain: 0.05, release: 0.4 },
+    volume: -22,
+  }).toDestination();
+
+  // Soft hi-hat / percussion
+  const hat = new Tone.NoiseSynth({
+    noise: { type: "white" },
+    envelope: { attack: 0.001, decay: 0.08, sustain: 0, release: 0.03 },
+    volume: -28,
+  }).toDestination();
+
+  // Reverb for spacey feel
+  const reverb = new Tone.Reverb({ decay: 4, wet: 0.4 }).toDestination();
+  pad.connect(reverb);
+  arp.connect(reverb);
+
+  Tone.getTransport().bpm.value = 110;
+
+  // Pad chord progression — Cm → Ab → Eb → Bb (spacey minor vibes)
+  const chords = [
+    ["C3","Eb3","G3"],
+    ["Ab2","C3","Eb3"],
+    ["Eb3","G3","Bb3"],
+    ["Bb2","D3","F3"],
+  ];
+  musicParts.pad = new Tone.Sequence((time, chord) => {
+    pad.triggerAttackRelease(chord, "2n", time);
+  }, chords, "1n").start(0);
+
+  // Bass line
+  const bassNotes = ["C2","Ab1","Eb2","Bb1"];
+  musicParts.bass = new Tone.Sequence((time, note) => {
+    bass.triggerAttackRelease(note, "4n", time);
+  }, bassNotes, "1n").start(0);
+
+  // Arp melody — random-ish twinkling notes
+  const arpNotes = ["C4","Eb4","G4","Bb4","C5","G4","Eb4","D4","F4","Ab4","G4","Eb4","Bb4","Ab4","G4","F4"];
+  musicParts.arp = new Tone.Sequence((time, note) => {
+    if (Math.random() > 0.35) {
+      arp.triggerAttackRelease(note, "16n", time);
+    }
+  }, arpNotes, "8n").start("1n");
+
+  // Gentle rhythm
+  musicParts.hat = new Tone.Sequence((time, v) => {
+    if (v) hat.triggerAttackRelease("16n", time);
+  }, [1,0,1,0,1,0,1,1,1,0,0,1,1,0,1,0], "8n").start("2n");
+
+  Tone.getTransport().start();
+}
+
+function stopMusic() {
+  if (!musicStarted) return;
+  Tone.getTransport().stop();
+  Object.values(musicParts).forEach(p => { try { p.stop(); p.dispose(); } catch(e){} });
+  musicParts = {};
+  musicStarted = false;
+}
 
 // ─── CONFIG ───
 const POO_COLORS = [
@@ -83,8 +169,8 @@ function resetPlaysStore() {
 
 function getLbStore() {
   const s = getCookie("spd_lb");
-  if (s && Array.isArray(s) && s.length > 0) return s.sort((a,b) => b.score - a.score).slice(0,5);
-  return [...DEFAULT_LB];
+  if (s && Array.isArray(s) && s.length > 0) return s.sort((a,b) => b.score - a.score).slice(0,3);
+  return [...DEFAULT_LB].slice(0,3);
 }
 function saveLbStore(lb) { setCookie("spd_lb", lb, 365); }
 
@@ -155,6 +241,7 @@ export default function Game() {
   const [nearMiss, setNearMiss] = useState(null);
   const [zone, setZone] = useState(ZONES[0]);
   const [screenShake, setScreenShake] = useState(false);
+  const [musicOn, setMusicOn] = useState(true);
 
   const gameRef = useRef(null);
   const animRef = useRef(null);
@@ -163,6 +250,9 @@ export default function Game() {
   const gaRef = useRef({ w:400, h:700 });
   const eRef = useRef({ x:200, y:350, r:40 });
   const msHit = useRef(new Set());
+
+  // Cleanup music on unmount
+  useEffect(() => { return () => { stopMusic(); }; }, []);
 
   const sync = (k,v) => { pr.current[k]=v; };
   useEffect(()=>sync("phase",phase),[phase]);
@@ -239,7 +329,7 @@ export default function Game() {
       }
       setWarningRing(warn);
       if(fx.length){setEffects(e=>[...e,...fx]);setTimeout(()=>setEffects(e=>e.filter(x=>!fx.find(f=>f.id===x.id))),800);}
-      if(hit){setEarthHit(true);setPhase("gameover");return[];}
+      if(hit){setEarthHit(true);setPhase("gameover");stopMusic();return[];}
       return upd;
     });
 
@@ -266,7 +356,8 @@ export default function Game() {
     setNearMiss(null);setZone(ZONES[0]);setMilestone(null);setScreenShake(false);
     pr.current={phase:"playing",score:0,speed:1,poos:[],powerups:[],frozen:false,shield:false,double:false};
     msHit.current=new Set();idC=0;setPhase("playing");
-  },[playsLeft]);
+    if(musicOn){ Tone.start().then(()=>setupMusic()); }
+  },[playsLeft,musicOn]);
 
   useEffect(()=>{
     if(phase==="playing"){
@@ -281,7 +372,7 @@ export default function Game() {
 
   useEffect(()=>{
     if(phase==="gameover"&&!submitted&&username.trim()){
-      const nl=[...lb,{name:username.trim(),score}].sort((a,b)=>b.score-a.score).slice(0,5);
+      const nl=[...lb,{name:username.trim(),score}].sort((a,b)=>b.score-a.score).slice(0,3);
       setLb(nl);saveLbStore(nl);setSubmitted(true);
     }
   },[phase,score,username,submitted,lb]);
@@ -421,6 +512,7 @@ export default function Game() {
               {doublePoints&&<span style={{fontSize:14,marginRight:6,animation:"powerGlow 1s infinite"}}>⭐2X</span>}
               {hasShield&&<span style={{fontSize:14,marginRight:6}}>🛡️</span>}
               <span style={S.hudSpd}>×{speedMult.toFixed(1)}</span>
+              <span onClick={()=>{setMusicOn(m=>{const n=!m;if(n){Tone.start().then(()=>setupMusic());}else{stopMusic();}return n;});}} style={{marginLeft:8,fontSize:16,cursor:"pointer",opacity:musicOn?1:0.4,filter:"drop-shadow(0 0 4px rgba(255,255,255,.3))"}}>{musicOn?"🔊":"🔇"}</span>
             </div>
           </div>
           {combo>=3&&<div style={{...S.combo,animation:"comboGlow .5s infinite"}}>COMBO ×{combo}</div>}
@@ -453,6 +545,10 @@ export default function Game() {
                 </div>
                 <div style={S.playsBox}><span style={{color:"#94a3b8",fontSize:13}}>Plays today: </span>
                   {[...Array(MAX_PLAYS_PER_DAY)].map((_,i)=><span key={i} style={{fontSize:18,opacity:i<playsLeft?1:.2,marginLeft:2}}>🚀</span>)}</div>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,marginBottom:12}}>
+                  <span onClick={()=>setMusicOn(m=>!m)} style={{cursor:"pointer",fontSize:22,opacity:musicOn?1:0.4,transition:"opacity .2s"}}>{musicOn?"🔊":"🔇"}</span>
+                  <span style={{color:"#64748b",fontSize:12,fontWeight:700}}>{musicOn?"Music ON":"Music OFF"}</span>
+                </div>
                 {playsLeft>0?<button onClick={startGame} style={S.playBtn}>DEFEND EARTH! 🚀</button>
                   :<div style={{marginTop:16}}><p style={{color:"#f87171",fontFamily:"'Bungee',cursive",fontSize:16}}>No plays left today!</p><p style={{color:"#64748b",fontSize:13,marginTop:4}}>Come back tomorrow</p></div>}
                 <div style={S.lbBox}><p style={S.lbTitle}>🏆 TOP DEFENDERS</p>
