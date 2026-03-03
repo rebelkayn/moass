@@ -545,7 +545,7 @@ export default function Game() {
 
         {phase==="playing"&&<>
           <div style={S.hud}>
-            <div style={S.hudL}><span style={S.hudScore}>🛡️ {score}</span></div>
+            <div style={S.hudL}><span style={S.hudScore}>💩 {score}</span></div>
             <div style={S.hudC}>{spdLbl&&<span style={{...S.speedLbl,animation:"speedPulse .8s infinite"}}>{spdLbl}</span>}</div>
             <div style={S.hudR}>
               {doublePoints&&<span style={{fontSize:14,marginRight:6,animation:"powerGlow 1s infinite"}}>⭐2X</span>}
@@ -634,7 +634,7 @@ const S={
   space:{position:"absolute",inset:0,zIndex:0},
   nebula:{position:"absolute",width:"120%",height:"120%",top:"-10%",left:"-10%",zIndex:0,pointerEvents:"none"},
   hud:{position:"absolute",top:0,left:0,right:0,display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 16px",paddingTop:48,background:"linear-gradient(180deg,rgba(0,0,0,.6) 0%,transparent 100%)",zIndex:50},
-  hudL:{display:"flex",alignItems:"center"},hudC:{flex:1,textAlign:"center"},hudR:{display:"flex",alignItems:"center"},
+  hudL:{display:"flex",alignItems:"center",zIndex:2},hudC:{position:"absolute",left:0,right:0,top:0,bottom:0,display:"flex",alignItems:"center",justifyContent:"center",paddingTop:36,pointerEvents:"none"},hudR:{display:"flex",alignItems:"center",zIndex:2},
   hudScore:{fontFamily:"'Bungee',cursive",fontSize:24,color:"#fff",textShadow:"0 2px 8px rgba(0,0,0,.5)"},
   hudSpd:{fontFamily:"'Bungee',cursive",fontSize:15,color:"#fbbf24",background:"rgba(255,200,50,.1)",border:"1px solid rgba(255,200,50,.2)",borderRadius:10,padding:"3px 9px"},
   speedLbl:{fontFamily:"'Bungee',cursive",fontSize:11,color:"#fb923c",textShadow:"0 0 10px rgba(251,146,60,.5)"},
