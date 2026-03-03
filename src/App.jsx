@@ -1,88 +1,127 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import * as Tone from "tone";
 
-// ─── MUSIC ENGINE ───
+// ─── MUSIC ENGINE (Web Audio API — no dependencies) ───
+let audioCtx = null;
+let musicNodes = [];
+let musicInterval = null;
 let musicStarted = false;
-let musicParts = {};
+
+const NOTE_FREQ = {
+  "C2":65.41,"Ab1":51.91,"Eb2":77.78,"Bb1":58.27,
+  "C3":130.81,"Eb3":155.56,"G3":196,"Ab2":103.83,"Bb3":233.08,"D3":146.83,"F3":174.61,"Bb2":116.54,
+  "C4":261.63,"Eb4":311.13,"G4":392,"Bb4":466.16,"C5":523.25,"D4":293.66,"F4":349.23,"Ab4":415.30,
+};
 
 function setupMusic() {
   if (musicStarted) return;
   musicStarted = true;
+  try {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  } catch(e) { musicStarted = false; return; }
 
-  // Main synth — dreamy space pad
-  const pad = new Tone.PolySynth(Tone.Synth, {
-    oscillator: { type: "sine" },
-    envelope: { attack: 0.8, decay: 1.5, sustain: 0.4, release: 2 },
-    volume: -18,
-  }).toDestination();
+  // Master gain
+  const master = audioCtx.createGain();
+  master.gain.value = 0.3;
+  master.connect(audioCtx.destination);
 
-  // Bass synth
-  const bass = new Tone.MonoSynth({
-    oscillator: { type: "triangle" },
-    envelope: { attack: 0.1, decay: 0.4, sustain: 0.6, release: 0.8 },
-    filterEnvelope: { attack: 0.05, decay: 0.2, sustain: 0.4, release: 0.5, baseFrequency: 100, octaves: 2 },
-    volume: -20,
-  }).toDestination();
-
-  // Sparkle / arp synth
-  const arp = new Tone.Synth({
-    oscillator: { type: "sine" },
-    envelope: { attack: 0.01, decay: 0.3, sustain: 0.05, release: 0.4 },
-    volume: -22,
-  }).toDestination();
-
-  // Soft hi-hat / percussion
-  const hat = new Tone.NoiseSynth({
-    noise: { type: "white" },
-    envelope: { attack: 0.001, decay: 0.08, sustain: 0, release: 0.03 },
-    volume: -28,
-  }).toDestination();
-
-  // Reverb for spacey feel
-  const reverb = new Tone.Reverb({ decay: 4, wet: 0.4 }).toDestination();
-  pad.connect(reverb);
-  arp.connect(reverb);
-
-  Tone.getTransport().bpm.value = 110;
-
-  // Pad chord progression — Cm → Ab → Eb → Bb (spacey minor vibes)
-  const chords = [
-    ["C3","Eb3","G3"],
-    ["Ab2","C3","Eb3"],
-    ["Eb3","G3","Bb3"],
-    ["Bb2","D3","F3"],
-  ];
-  musicParts.pad = new Tone.Sequence((time, chord) => {
-    pad.triggerAttackRelease(chord, "2n", time);
-  }, chords, "1n").start(0);
-
-  // Bass line
-  const bassNotes = ["C2","Ab1","Eb2","Bb1"];
-  musicParts.bass = new Tone.Sequence((time, note) => {
-    bass.triggerAttackRelease(note, "4n", time);
-  }, bassNotes, "1n").start(0);
-
-  // Arp melody — random-ish twinkling notes
-  const arpNotes = ["C4","Eb4","G4","Bb4","C5","G4","Eb4","D4","F4","Ab4","G4","Eb4","Bb4","Ab4","G4","F4"];
-  musicParts.arp = new Tone.Sequence((time, note) => {
-    if (Math.random() > 0.35) {
-      arp.triggerAttackRelease(note, "16n", time);
+  // Reverb via convolver (simple delay-based)
+  const convolver = audioCtx.createConvolver();
+  const rate = audioCtx.sampleRate;
+  const len = rate * 2;
+  const impulse = audioCtx.createBuffer(2, len, rate);
+  for (let ch = 0; ch < 2; ch++) {
+    const data = impulse.getChannelData(ch);
+    for (let i = 0; i < len; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.5);
     }
-  }, arpNotes, "8n").start("1n");
+  }
+  convolver.buffer = impulse;
+  const wetGain = audioCtx.createGain();
+  wetGain.gain.value = 0.15;
+  convolver.connect(wetGain);
+  wetGain.connect(master);
 
-  // Gentle rhythm
-  musicParts.hat = new Tone.Sequence((time, v) => {
-    if (v) hat.triggerAttackRelease("16n", time);
-  }, [1,0,1,0,1,0,1,1,1,0,0,1,1,0,1,0], "8n").start("2n");
+  const dryGain = audioCtx.createGain();
+  dryGain.gain.value = 0.85;
+  dryGain.connect(master);
 
-  Tone.getTransport().start();
+  musicNodes.push(master, convolver, wetGain, dryGain);
+
+  function playNote(freq, startTime, duration, type = "sine", vol = 0.12) {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = type;
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0, startTime);
+    gain.gain.linearRampToValueAtTime(vol, startTime + Math.min(0.15, duration * 0.3));
+    gain.gain.linearRampToValueAtTime(vol * 0.6, startTime + duration * 0.7);
+    gain.gain.linearRampToValueAtTime(0, startTime + duration);
+    osc.connect(gain);
+    gain.connect(dryGain);
+    gain.connect(convolver);
+    osc.start(startTime);
+    osc.stop(startTime + duration + 0.1);
+  }
+
+  function playChord(notes, startTime, duration, vol = 0.06) {
+    notes.forEach(n => playNote(NOTE_FREQ[n], startTime, duration, "sine", vol));
+  }
+
+  // Chord progression: Cm → Ab → Eb → Bb
+  const chords = [["C3","Eb3","G3"],["Ab2","C3","Eb3"],["Eb3","G3","Bb3"],["Bb2","D3","F3"]];
+  const bassNotes = ["C2","Ab1","Eb2","Bb1"];
+  const arpNotes = ["C4","Eb4","G4","Bb4","C5","G4","Eb4","D4","F4","Ab4","G4","Eb4","Bb4","Ab4","G4","F4"];
+
+  const BPM = 110;
+  const beatSec = 60 / BPM;
+  const barSec = beatSec * 4;
+  const loopLen = barSec * 4; // 4 bars per loop
+
+  function scheduleLoop() {
+    if (!audioCtx || audioCtx.state === "closed") return;
+    const now = audioCtx.currentTime + 0.05;
+
+    // Pad chords
+    chords.forEach((ch, i) => playChord(ch, now + i * barSec, barSec * 0.9, 0.055));
+
+    // Bass
+    bassNotes.forEach((n, i) => playNote(NOTE_FREQ[n], now + i * barSec, beatSec * 1.5, "triangle", 0.1));
+
+    // Arp twinkle
+    arpNotes.forEach((n, i) => {
+      if (Math.random() > 0.3) {
+        playNote(NOTE_FREQ[n], now + i * (beatSec / 2), beatSec * 0.3, "sine", 0.04);
+      }
+    });
+
+    // Soft kick-like pulse every beat
+    for (let i = 0; i < 16; i++) {
+      if (i % 2 === 0 || (i % 4 === 3 && Math.random() > 0.5)) {
+        const t = now + i * (beatSec / 2);
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(80, t);
+        osc.frequency.exponentialRampToValueAtTime(30, t + 0.08);
+        gain.gain.setValueAtTime(0.06, t);
+        gain.gain.linearRampToValueAtTime(0, t + 0.1);
+        osc.connect(gain);
+        gain.connect(dryGain);
+        osc.start(t);
+        osc.stop(t + 0.15);
+      }
+    }
+  }
+
+  scheduleLoop();
+  musicInterval = setInterval(scheduleLoop, loopLen * 1000 - 100);
 }
 
 function stopMusic() {
   if (!musicStarted) return;
-  Tone.getTransport().stop();
-  Object.values(musicParts).forEach(p => { try { p.stop(); p.dispose(); } catch(e){} });
-  musicParts = {};
+  if (musicInterval) { clearInterval(musicInterval); musicInterval = null; }
+  if (audioCtx) { try { audioCtx.close(); } catch(e){} audioCtx = null; }
+  musicNodes = [];
   musicStarted = false;
 }
 
@@ -356,7 +395,7 @@ export default function Game() {
     setNearMiss(null);setZone(ZONES[0]);setMilestone(null);setScreenShake(false);
     pr.current={phase:"playing",score:0,speed:1,poos:[],powerups:[],frozen:false,shield:false,double:false};
     msHit.current=new Set();idC=0;setPhase("playing");
-    if(musicOn){ Tone.start().then(()=>setupMusic()); }
+    if(musicOn){ setupMusic(); }
   },[playsLeft,musicOn]);
 
   useEffect(()=>{
@@ -512,7 +551,7 @@ export default function Game() {
               {doublePoints&&<span style={{fontSize:14,marginRight:6,animation:"powerGlow 1s infinite"}}>⭐2X</span>}
               {hasShield&&<span style={{fontSize:14,marginRight:6}}>🛡️</span>}
               <span style={S.hudSpd}>×{speedMult.toFixed(1)}</span>
-              <span onClick={()=>{setMusicOn(m=>{const n=!m;if(n){Tone.start().then(()=>setupMusic());}else{stopMusic();}return n;});}} style={{marginLeft:8,fontSize:16,cursor:"pointer",opacity:musicOn?1:0.4,filter:"drop-shadow(0 0 4px rgba(255,255,255,.3))"}}>{musicOn?"🔊":"🔇"}</span>
+              <span onClick={()=>{setMusicOn(m=>{const n=!m;if(n){setupMusic();}else{stopMusic();}return n;});}} style={{marginLeft:8,fontSize:16,cursor:"pointer",opacity:musicOn?1:0.4,filter:"drop-shadow(0 0 4px rgba(255,255,255,.3))"}}>{musicOn?"🔊":"🔇"}</span>
             </div>
           </div>
           {combo>=3&&<div style={{...S.combo,animation:"comboGlow .5s infinite"}}>COMBO ×{combo}</div>}
@@ -551,9 +590,6 @@ export default function Game() {
                 </div>
                 {playsLeft>0?<button onClick={startGame} style={S.playBtn}>DEFEND EARTH! 🚀</button>
                   :<div style={{marginTop:16}}><p style={{color:"#f87171",fontFamily:"'Bungee',cursive",fontSize:16}}>No plays left today!</p><p style={{color:"#64748b",fontSize:13,marginTop:4}}>Come back tomorrow</p></div>}
-                <div style={S.lbBox}><p style={S.lbTitle}>🏆 TOP DEFENDERS</p>
-                  {lb.map((e,i)=><div key={i} style={{...S.lbRow,animation:`fadeIn ${.3+i*.1}s ease`,background:i===0?"rgba(255,200,50,.08)":"transparent"}}>
-                    <span style={S.lbMed}>{med(i)}</span><span style={S.lbName}>{e.name}</span><span style={S.lbSc}>{e.score}</span></div>)}</div>
                 <p onClick={()=>{setShowCode(true);setCodeIn("");setCodeErr("");setCodeOk(false)}} style={S.secLink}>Got a code?</p>
                 <p onClick={()=>setShowName(true)} style={{color:"#475569",fontSize:11,marginTop:6,cursor:"pointer",textDecoration:"underline"}}>Change name</p>
               </>
